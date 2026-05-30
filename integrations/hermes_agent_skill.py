@@ -1,5 +1,7 @@
 import subprocess
+from agentskills import skill
 
+@skill
 def get_nav_bookmarks() -> str:
     """
     Execute 'nav list' to retrieve all user-curated directory bookmarks.
@@ -13,6 +15,7 @@ def get_nav_bookmarks() -> str:
     except Exception as e:
         return f"Error running nav list: {e}"
 
+@skill
 def add_nav_bookmark(path: str, tags: list[str]) -> str:
     """
     Execute 'nav mark <path> -t <tag1> ...' to bookmark an important directory for the user.
