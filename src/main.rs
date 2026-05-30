@@ -15,9 +15,11 @@ usage: nav [options] [command]
   COMMANDS
     init      Auto-generate .navmarks from directory conventions
     init      Generate shell init script: nav init <zsh|bash|fish>
-    mark      Mark current or specified path as a bookmark
-    remove    Remove a bookmark manually
-    list      List all active bookmarks in JSONL format (Agent-friendly mode)
+    mark      Bookmark current or specified path
+    note      Add or update the note on a bookmark
+    edit      Open .navmarks in $EDITOR
+    remove    Remove a bookmark
+    list      List all bookmarks as JSONL (agent-friendly)
 
   OPTIONS
     --help    Print this message
@@ -30,21 +32,32 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Mark current or specified path as a bookmark
+    /// Bookmark current or specified path
     Mark {
         /// Path to bookmark (defaults to current directory)
         #[arg(default_value = ".")]
         path: String,
+        /// Note for agents and teammates
+        note: Option<String>,
         /// Tags for the bookmark (can be used multiple times)
         #[arg(short, long)]
         tag: Vec<String>,
-        /// Optional note for agents (e.g. "main event loop, start here")
-        #[arg(short, long)]
-        note: Option<String>,
     },
-    /// List all active bookmarks in JSONL format (Agent-friendly mode)
-    List,
-    /// Remove a bookmark manually
+    /// Add or update the note on a bookmark
+    Note {
+        /// Path of the bookmark to annotate
+        path: String,
+        /// Note text
+        note: String,
+    },
+    /// Open .navmarks in $EDITOR
+    Edit,
+    /// List all bookmarks as JSONL (agent-friendly)
+    List {
+        /// Project root to read from (defaults to CWD-based detection)
+        path: Option<String>,
+    },
+    /// Remove a bookmark
     Remove {
         /// Path to remove from bookmarks
         path: String,
@@ -65,16 +78,35 @@ struct Bookmark {
 }
 
 fn find_project_root() -> PathBuf {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let mut current = cwd.clone();
+    find_project_root_from(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+}
+
+fn find_project_root_from(start: PathBuf) -> PathBuf {
+    let start = fs::canonicalize(&start).unwrap_or(start);
+
+    // .git takes priority: stops at the innermost git repo root
+    let mut current = start.clone();
     loop {
-        if current.join(".git").exists() || current.join(".navmarks").exists() {
+        if current.join(".git").exists() {
             return current;
         }
         if !current.pop() {
-            return cwd;
+            break;
         }
     }
+
+    // fall back to .navmarks for non-git projects
+    let mut current = start.clone();
+    loop {
+        if current.join(".navmarks").exists() {
+            return current;
+        }
+        if !current.pop() {
+            break;
+        }
+    }
+
+    start
 }
 
 fn read_navmarks(root: &Path) -> Vec<Bookmark> {
@@ -86,11 +118,9 @@ fn read_navmarks(root: &Path) -> Vec<Bookmark> {
             !t.is_empty() && !t.starts_with('#')
         })
         .filter_map(|line| {
-            // First separator: tab or space (backward compat)
             let (raw_rel, rest) = line.split_once(|c: char| c == '\t' || c == ' ')?;
             let rel = raw_rel.trim().to_string();
 
-            // Second separator: tab only (note may contain spaces)
             let (tags_str, note) = match rest.split_once('\t') {
                 Some((t, n)) => (t.trim(), Some(n.trim().to_string()).filter(|s| !s.is_empty())),
                 None => (rest.trim(), None),
@@ -186,7 +216,7 @@ fn main() {
     let root = find_project_root();
 
     match &cli.command {
-        Some(Commands::Mark { path, tag, note }) => {
+        Some(Commands::Mark { path, note, tag }) => {
             let abs = fs::canonicalize(path).unwrap_or_else(|_| PathBuf::from(path));
             let rel = to_rel(&abs, &root);
 
@@ -212,6 +242,33 @@ fn main() {
 
             write_navmarks(&root, &bookmarks);
         }
+        Some(Commands::Note { path, note }) => {
+            let abs = fs::canonicalize(path).unwrap_or_else(|_| PathBuf::from(path));
+            let rel = to_rel(&abs, &root);
+            let mut bookmarks = read_navmarks(&root);
+
+            match bookmarks.iter_mut().find(|b| b.rel_path == rel) {
+                Some(existing) => {
+                    existing.note = Some(note.clone());
+                    write_navmarks(&root, &bookmarks);
+                }
+                None => {
+                    eprintln!("No bookmark for '{}'. Use `nav mark` to add it first.", rel);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Some(Commands::Edit) => {
+            let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
+            let navmarks_path = root.join(".navmarks");
+            if !navmarks_path.exists() {
+                let _ = fs::write(&navmarks_path, "");
+            }
+            if let Err(e) = Command::new(&editor).arg(&navmarks_path).status() {
+                eprintln!("Error opening editor '{}': {}", editor, e);
+                std::process::exit(1);
+            }
+        }
         Some(Commands::Remove { path }) => {
             let abs = fs::canonicalize(path).unwrap_or_else(|_| PathBuf::from(path));
             let rel = to_rel(&abs, &root);
@@ -221,18 +278,19 @@ fn main() {
                 .collect();
             write_navmarks(&root, &bookmarks);
         }
-        Some(Commands::List) => {
+        Some(Commands::List { path }) => {
+            let root = match path {
+                Some(p) => find_project_root_from(PathBuf::from(p)),
+                None => root,
+            };
             for b in read_navmarks(&root) {
                 if b.abs_path.exists() {
-                    let mut obj = json!({
+                    println!("{}", json!({
+                        "note": b.note,
                         "path": b.abs_path.to_string_lossy(),
                         "rel": b.rel_path,
                         "tags": b.tags.join(", ")
-                    });
-                    if let Some(note) = &b.note {
-                        obj["note"] = json!(note);
-                    }
-                    println!("{}", obj);
+                    }));
                 }
             }
         }
@@ -292,20 +350,39 @@ end
             }
         }
         None => {
-            let bookmarks: Vec<Bookmark> = read_navmarks(&root)
+            let mut bookmarks: Vec<Bookmark> = read_navmarks(&root)
                 .into_iter()
                 .filter(|b| b.abs_path.exists())
                 .collect();
 
             if bookmarks.is_empty() {
-                eprintln!("No bookmarks found. Run `nav init` to auto-detect, or `nav mark -t <tag>` to add one.");
+                eprintln!("No bookmarks found. Run `nav init` to auto-detect, or `nav mark <path>` to add one.");
                 std::process::exit(0);
             }
+
+            // entries with notes sort first
+            bookmarks.sort_by(|a, b| match (&a.note, &b.note) {
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                _ => std::cmp::Ordering::Equal,
+            });
 
             let mut input = String::new();
             for b in &bookmarks {
                 let tag_str = b.tags.iter().map(|t| format!("#{}", t)).collect::<Vec<_>>().join(" ");
-                input.push_str(&format!("[{}] {}\n", tag_str, b.abs_path.to_string_lossy()));
+                match &b.note {
+                    Some(note) => input.push_str(&format!(
+                        "{}  [{}]  {}\n",
+                        note,
+                        tag_str,
+                        b.abs_path.to_string_lossy()
+                    )),
+                    None => input.push_str(&format!(
+                        "[{}]  {}\n",
+                        tag_str,
+                        b.abs_path.to_string_lossy()
+                    )),
+                }
             }
 
             let mut fzf = match Command::new("fzf")
@@ -328,7 +405,8 @@ end
             let selected = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
             if !selected.is_empty() {
-                let path = selected.find(']')
+                // rfind so notes containing ] don't break extraction
+                let path = selected.rfind(']')
                     .map(|i| selected[i + 1..].trim().to_string())
                     .unwrap_or(selected);
                 println!("{}", path);
