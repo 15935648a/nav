@@ -1,46 +1,55 @@
-# 🤖 Agent Usage Instructions for `nav`
+# Agent Usage Guide
 
-This tool is built with an "Agent-First" philosophy in mind.
+**Do not run `nav` without arguments.** It opens an interactive fzf UI that expects a TTY and will block indefinitely.
 
-If you are an AI assistant or Agent trying to navigate the user's file system or codebase:
-**DO NOT RUN `nav` without arguments.** Running `nav` opens an interactive `fzf` UI that expects a TTY and will block your execution loop indefinitely.
+Use the machine-readable command instead:
 
-Instead, use the machine-readable command:
 ```bash
 nav list
 ```
 
-This command safely bypasses the interactive UI and outputs all of the user's active bookmarks in standard **JSONL (JSON Lines)** format. This allows you to easily parse the user's most important semantic project paths and tags.
+This outputs all bookmarks defined in the repo's `.navmarks` file as JSONL:
 
-### Example Output:
 ```jsonl
-{"path": "/Users/san/Projects/web", "tags": "work, frontend"}
-{"path": "/var/log", "tags": "server, logs"}
+{"path": "/Users/san/Projects/myapp/src/api", "rel": "src/api", "tags": "api, entrypoint", "note": "main event loop, start here"}
+{"path": "/Users/san/Projects/myapp/src/auth", "rel": "src/auth", "tags": "auth, security", "note": "JWT validation — touch carefully"}
+{"path": "/Users/san/Projects/myapp/tests", "rel": "tests", "tags": "tests"}
 ```
 
-### Best Practices for Agents:
-1. When you first enter a new system, run `nav list` to build a mental map of where the important directories are located.
-2. The user has thoughtfully categorized these paths using `tags`. Use these tags (e.g., `frontend`, `api`, `config`) to infer context and quickly jump to the right directories during your task.
+The `note` field is optional. When present, it contains human-written context about the path — use it to understand intent and caveats before diving in.
 
-### Structured Generation (XGrammar / Outlines)
-If you are an underlying LLM inference engine generating commands or parsing this output, you can use the provided [`nav-schema.json`](nav-schema.json) to strictly constrain the generation to this exact object format.
+**Best practices:**
+1. Run `nav list` when entering a project to get a semantic map of the important directories.
+2. Use the tags (`api`, `frontend`, `tests`, etc.) to infer context before running broad searches like `find` or `ls -R`.
+3. When a `note` is present, read it before editing files in that path.
+4. To bookmark a path on the user's behalf: `nav mark <path> -t <tag> -n "context note"`.
+
+## .navmarks format
+
+The `.navmarks` file lives at the repo root and is meant to be committed to git:
+
+```
+src/api       api,entrypoint    main event loop, start here
+src/auth      auth,security     JWT validation — touch carefully
+src/frontend  frontend,react
+tests         tests
+```
+
+Each line is `<path>\t<tag1,tag2>\t<optional note>`. Paths are relative to the git root. The note column is freetext and may contain spaces.
 
 ---
 
-## 🛠️ Integration Guide for Humans (Opt-in)
+## Integrations
 
-We believe in **Zero Intrusion**. `nav` will never secretly modify your global AI settings. If you want your AI to proactively use `nav`, please manually apply the following integrations:
+### Cursor / Windsurf / Aider
 
-### 1. For Cursor / Windsurf / Aider
-Copy and paste this instruction into your `~/.cursorrules`, `.windsurfrules`, or global AI prompt:
+Add to `~/.cursorrules`, `.windsurfrules`, or your global AI prompt:
 
-```text
-When exploring a new project or codebase, execute `nav list` in the terminal first to read my semantic directory bookmarks. Use these paths and tags to understand the project structure before running blind searches like `find` or `ls -R`. If I ask you to categorize a directory, use `nav mark <path> -t <tag>`.
+```
+When exploring a project, run `nav list` first to read the semantic directory bookmarks defined in .navmarks. Use the paths and tags to understand the project structure before running broad searches like `find` or `ls -R`. To bookmark a directory: `nav mark <path> -t <tag>`.
 ```
 
-### 2. For `hermes-agent` (or `agentskills.io` compatible frameworks)
-We provide an official, ready-to-use Python skill in the `integrations/` directory.
-Simply copy it into your agent's skills folder to instantly give your local model spatial memory:
+### hermes-agent / agentskills.io
 
 ```bash
 cp integrations/hermes_agent_skill.py /path/to/your/hermes-agent/skills/
