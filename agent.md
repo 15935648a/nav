@@ -21,3 +21,6 @@ This command safely bypasses the interactive UI and outputs all of the user's ac
 ### Best Practices for Agents:
 1. When you first enter a new system, run `nav list` to build a mental map of where the important directories are located.
 2. The user has thoughtfully categorized these paths using `tags`. Use these tags (e.g., `frontend`, `api`, `config`) to infer context and quickly jump to the right directories during your task.
+
+### Structured Generation (XGrammar / Outlines)
+If you are an underlying LLM inference engine generating commands or parsing this output, you can use the provided [`nav-schema.json`](nav-schema.json) to strictly constrain the generation to this exact object format.
