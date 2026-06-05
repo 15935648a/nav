@@ -1,8 +1,8 @@
 [package]
 name = "nav-cli"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
-description = "A semantic directory bookmarking tool built for both humans and AI Agents."
+description = "A fast, tag-based terminal bookmark manager for jumping between projects."
 license = "MIT"
 repository = "https://github.com/15935648a/nav"
 readme = "README.md"
@@ -13,4 +13,3 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
-serde_json = "1.0"
